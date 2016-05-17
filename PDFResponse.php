@@ -24,26 +24,24 @@ use Nette\Callback;
  * @property-read mPDFExtended $mPDF
  */
 class PdfResponse extends Object implements \Nette\Application\IResponse {
-	
+
 	/**
 	 * Source data
 	 * @var mixed
 	 */
 	private $source;
 
-	
 	/**
 	 * Callback - create mPDF object
 	 * @var Callback
 	 */
 	public $createMPDF = null;
 
-	
 	/**
 	 * Portrait page orientation
 	 */
-	const ORIENTATION_PORTRAIT  = "P";
-	
+	const ORIENTATION_PORTRAIT = "P";
+
 	/**
 	 * Landscape page orientation
 	 */
@@ -71,7 +69,6 @@ class PdfResponse extends Object implements \Nette\Application\IResponse {
 	 */
 	public $pageOrientation = self::ORIENTATION_PORTRAIT;
 
-	
 	/**
 	 * Specifies format of the document<br>
 	 * <br>
@@ -226,7 +223,7 @@ class PdfResponse extends Object implements \Nette\Application\IResponse {
 	 */
 	function getMargins() {
 		$margins = explode(",", $this->pageMargins);
-		if(count($margins) !== 6) {
+		if (count($margins) !== 6) {
 			throw new \Nette\InvalidStateException("You must specify all margins! For example: 16,15,16,15,9,9");
 		}
 
@@ -240,9 +237,9 @@ class PdfResponse extends Object implements \Nette\Application\IResponse {
 		);
 
 		$marginsOut = array();
-		foreach($margins AS $key => $val) {
-			$val = (int)$val;
-			if($val < 0) {
+		foreach ($margins AS $key => $val) {
+			$val = (int) $val;
+			if ($val < 0) {
 				throw new \Nette\InvalidArgumentException("Margin must not be negative number!");
 			}
 			$marginsOut[$dictionary[$key]] = $val;
@@ -255,11 +252,9 @@ class PdfResponse extends Object implements \Nette\Application\IResponse {
 	 * @param  mixed  renderable variable
 	 */
 	public function __construct($source) {
-		$this->createMPDF = callback($this,"createMPDF");
+		$this->createMPDF = callback($this, "createMPDF");
 		$this->source = $source;
 	}
-
-
 
 	/**
 	 * Getts source document html
@@ -270,44 +265,49 @@ class PdfResponse extends Object implements \Nette\Application\IResponse {
 		$source = $this->getRawSource();
 
 		// String given
-		if(is_string($source)) {
+		if (is_string($source)) {
 			return $source;
 		};
 
 		// Nette template given
-		if ($source instanceof \Nette\Templating\ITemplate || $source instanceof \Nette\Application\UI\ITemplate ) {
+		if ($source instanceof \Nette\Templating\ITemplate || $source instanceof \Nette\Application\UI\ITemplate) {
 			$source->pdfResponse = $this;
 			$source->mPDF = $this->getMPDF();
 			return $source->__toString();
-
 		};
 
 		// Other case - not supported
-		throw new \Nette\InvalidStateException("Source is not supported! (type: ".
-			(is_object($source) ? ("object of class " . get_class($source)) : gettype($source)).
+		throw new \Nette\InvalidStateException("Source is not supported! (type: " .
+		(is_object($source) ? ("object of class " . get_class($source)) : gettype($source)) .
 		")");
 	}
 
 	public function getRawSource() {
-		if(!$this->source) {
+		if (!$this->source) {
 			throw new \Nette\InvalidStateException("Source is not defined!");
 		}
-		
+
 		return $this->source;
 	}
-
-
 
 	/**
 	 * Sends response to output.
 	 * @return void
 	 */
 	public function send(IRequest $httpRequest, IResponse $httpResponse) {
+		$this->processMpdf();
+	}
+
+	/**
+	 * Returns proccessed MPDF file
+	 * @return mixed
+	 */
+	public function processMpdf() {
 		// Throws exception if sources can not be processed
 		$html = $this->getSource();
-		
+
 		// Fix: $html can't be empty (mPDF generates Fatal error)
-		if(empty($html)) {
+		if (empty($html)) {
 			$html = "<html><body></body></html>";
 		}
 
@@ -315,49 +315,54 @@ class PdfResponse extends Object implements \Nette\Application\IResponse {
 		$mpdf->biDirectional = $this->multiLanguage;
 		$mpdf->SetAuthor($this->documentAuthor);
 		$mpdf->SetTitle($this->documentTitle);
-		$mpdf->SetDisplayMode($this->displayZoom,$this->displayLayout);
+		$mpdf->SetDisplayMode($this->displayZoom, $this->displayLayout);
+
+		$simpleHtmlDomExists = class_exists('\\simple_html_dom', true);
 
 		// @see: http://mpdf1.com/manual/index.php?tid=121&searchstring=writeHTML
-		if($this->ignoreStylesInHTMLDocument) {
+		if ($this->ignoreStylesInHTMLDocument && $simpleHtmlDomExists) {
 
 			// copied from mPDF -> removes comments
-			$html = preg_replace('/<!--mpdf/i','',$html);
-			$html = preg_replace('/mpdf-->/i','',$html);
-			$html = preg_replace('/<\!\-\-.*?\-\->/s','',$html);
+			$html = preg_replace('/<!--mpdf/i', '', $html);
+			$html = preg_replace('/mpdf-->/i', '', $html);
+			$html = preg_replace('/<\!\-\-.*?\-\->/s', '', $html);
 
 			// deletes all <style> tags
-			$parsedHtml = new simple_html_dom($html);
-			foreach($parsedHtml->find("style") AS $el) {
+			$parsedHtml = new \simple_html_dom($html);
+			foreach ($parsedHtml->find("style") AS $el) {
 				$el->outertext = "";
 			}
 			$html = $parsedHtml->__toString();
 
 			$mode = 2; // If <body> tags are found, all html outside these tags are discarded, and the rest is parsed as content for the document. If no <body> tags are found, all html is parsed as content. Prior to mPDF 4.2 the default CSS was not parsed when using mode #2
-		}else {
+		} else {
 			$mode = 0; // Parse all: HTML + CSS
 		}
 
 
-		if(class_exists('\\simple_html_dom',true)) {
+		if ($simpleHtmlDomExists) {
 			// Support for base64 encoded images - workaround
 			$parsedHtml = new \simple_html_dom($html);
 			$i = 1000;
-			foreach($parsedHtml->find("img") AS $element) {
+			foreach ($parsedHtml->find("img") AS $element) {
 				$boundary1 = "data:";
 				$pos1 = strlen($boundary1);
-				if(!substr($element->src,0,$pos1) == $boundary1) continue;
-				$pos2 = strpos($element->src,";",$pos1);
-				if($pos2 === false) continue;
-				$mime = substr($element->src, $pos1, $pos2-$pos1);
+				if (!substr($element->src, 0, $pos1) == $boundary1)
+					continue;
+				$pos2 = strpos($element->src, ";", $pos1);
+				if ($pos2 === false)
+					continue;
+				$mime = substr($element->src, $pos1, $pos2 - $pos1);
 				$boundary = "base64,";
-				$base64 = substr($element->src, $pos2+strlen($boundary)+1);
-				
+				$base64 = substr($element->src, $pos2 + strlen($boundary) + 1);
+
 				$data = base64_decode($base64);
-				if($data === false) continue;
-				
-				$propertyName = "base64Image".$i;
+				if ($data === false)
+					continue;
+
+				$propertyName = "base64Image" . $i;
 				$mpdf->$propertyName = $data;
-				$element->src = "var:".$propertyName;
+				$element->src = "var:" . $propertyName;
 				$i++;
 			}
 			$html = $parsedHtml->__toString();
@@ -365,48 +370,39 @@ class PdfResponse extends Object implements \Nette\Application\IResponse {
 
 
 		// Add content
-		$mpdf->WriteHTML(
-			$html,
-			$mode
-		);
+		$mpdf->WriteHTML($html, $mode);
 
 		// Add styles
-		if(!empty($this->styles)) {
-			$mpdf->WriteHTML(
-				$this->styles,
-				1
-			);
+		if (!empty($this->styles)) {
+			$mpdf->WriteHTML($this->styles, 1);
 		}
 
 		$this->onBeforeComplete($mpdf);
 
-		if(!$this->outputName) {
-			$this->outputName = Strings::webalize($this->documentTitle).".pdf";
+		if (!$this->outputName) {
+			$this->outputName = Strings::webalize($this->documentTitle) . ".pdf";
 		}
 
-		$mpdf->Output($this->outputName,$this->outputDestination);
+		return $mpdf->Output($this->outputName, $this->outputDestination);
 	}
-
 
 	/**
 	 * Returns mPDF object
 	 * @return mPDFExtended
 	 */
 	public function getMPDF() {
-		if(!$this->mPDF instanceof mPDF) {
-			if($this->createMPDF instanceof Callback && $this->createMPDF->isCallable()) {
+		if (!$this->mPDF instanceof mPDF) {
+			if ($this->createMPDF instanceof Callback && $this->createMPDF->isCallable()) {
 				$mpdf = $this->createMPDF->invoke($this);
-				if(!($mpdf instanceof \mPDF)) {
+				if (!($mpdf instanceof \mPDF)) {
 					throw new \Nette\InvalidStateException("Callback function createMPDF must return mPDF object!");
 				}
 				$this->mPDF = $mpdf;
-			}else
+			} else
 				throw new \Nette\InvalidStateException("Callback createMPDF is not callable or is not instance of Nette\Callback!");
 		}
 		return $this->mPDF;
 	}
-
-
 
 	/**
 	 * Creates and returns mPDF object
@@ -418,17 +414,17 @@ class PdfResponse extends Object implements \Nette\Application\IResponse {
 
 		//  [ float $margin_header , float $margin_footer [, string $orientation ]]]]]])
 		$mpdf = new mPDFExtended(
-			'utf-8',            // string $codepage
-			$this->pageFormat,  // mixed $format
-			'',                 // float $default_font_size
-			'',                 // string $default_font
-			$margins["left"],   // float $margin_left
-			$margins["right"],  // float $margin_right
-			$margins["top"],    // float $margin_top
-			$margins["bottom"], // float $margin_bottom
-			$margins["header"], // float $margin_header
-			$margins["footer"], // float $margin_footer
-			$this->pageOrientation
+				'utf-8', // string $codepage
+				$this->pageFormat, // mixed $format
+				'', // float $default_font_size
+				'', // string $default_font
+				$margins["left"], // float $margin_left
+				$margins["right"], // float $margin_right
+				$margins["top"], // float $margin_top
+				$margins["bottom"], // float $margin_bottom
+				$margins["header"], // float $margin_header
+				$margins["footer"], // float $margin_footer
+				$this->pageOrientation
 		);
 
 		return $mpdf;
